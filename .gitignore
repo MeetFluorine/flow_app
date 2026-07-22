@@ -1,0 +1,16 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Never commit real Supabase keys if you fork this into per-environment configs
+# (the anon key in js/supabase-config.js is meant to be public/embedded, but
+#  keep this here in case you later add a .env or a service-role key anywhere)
+.env
+.env.local
+*.local.js
+
+# Node, if you ever add tooling on top of this static site
+node_modules/
+dist/

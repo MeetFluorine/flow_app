@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flow — Inward, Issuance &amp; S2S Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="topnav">
+  <div class="brand">
+    <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h13M13 6l7 6-7 6" stroke="#08110F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div><h1 style="font-family:var(--display);font-size:17px;margin:0;">Flow</h1></div>
+  </div>
+  <div class="navlinks">
+    <a class="navlink" href="#dashboard" data-view="dashboard">Dashboard</a>
+    <a class="navlink" href="#admin" data-view="admin">Admin Upload</a>
+    <a class="navlink" href="#calc" data-view="calc">Calculation</a>
+  </div>
+</div>
+
+<!-- ============================= DASHBOARD ============================= -->
+<div id="view-dashboard" class="view" data-mode="inward">
+  <div class="app">
+    <header class="hero" style="margin-top:16px;">
+      <div class="hero-inner">
+        <div class="brandrow">
+          <h2 class="hero-title" style="margin:0;">Material movement dashboard</h2>
+          <div class="modepill" id="modeIndicator"><span class="dot"></span><span id="modeIndicatorText">MRS INWARD</span></div>
+        </div>
+        <p class="hero-sub">Reading straight from the shared database — every month anyone has uploaded via the admin panel.</p>
+        <div class="segwrap" style="max-width:420px; margin-top:16px;" id="modeSeg">
+          <button data-v="inward" class="on">MRS Inward</button>
+          <button data-v="issuance">Issuance</button>
+          <button data-v="s2s">S2S Transfer</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="dash" id="dashView">
+      <div class="dashtop">
+        <div class="fname" id="loadedStats">Loading…</div>
+        <div style="display:flex; gap:8px;">
+          <a class="btn ghost small" href="#calc" data-view="calc">Calculation dashboard →</a>
+        </div>
+      </div>
+
+      <div class="filters">
+        <div class="field">
+          <label>Month</label>
+          <input class="combo-input" id="monthInput" placeholder="All months" autocomplete="off">
+          <div class="combo-list" id="monthList"></div>
+        </div>
+        <div class="field">
+          <label>Item code</label>
+          <input class="combo-input" id="itemInput" placeholder="All items" autocomplete="off">
+          <div class="combo-list" id="itemList"></div>
+        </div>
+        <div class="field">
+          <label>Store (SS)</label>
+          <input class="combo-input" id="storeInput" placeholder="All stores" autocomplete="off">
+          <div class="combo-list" id="storeList"></div>
+        </div>
+        <div class="field">
+          <label>Circle</label>
+          <input class="combo-input" id="circleInput" placeholder="All circles" autocomplete="off">
+          <div class="combo-list" id="circleList"></div>
+        </div>
+        <div class="field" id="txnField">
+          <label>Transaction type</label>
+          <div class="segwrap" id="txnSeg">
+            <button data-v="allocate" class="on">Allocate only</button>
+            <button data-v="recover">Recovery only</button>
+            <button data-v="all">All</button>
+            <button data-v="net">Net</button>
+          </div>
+        </div>
+        <div class="field hidden" id="flowField">
+          <label>Flow direction</label>
+          <div class="segwrap" id="flowSeg"></div>
+        </div>
+        <div class="field clearrow">
+          <button class="btn ghost small" id="clearFiltersBtn" style="width:100%;">Clear filters</button>
+        </div>
+      </div>
+      <div class="chips" id="activeChips"></div>
+
+      <div class="statrow">
+        <div class="stat accent"><div class="lbl">Total Qty (filtered)</div><div class="val" id="statTotalQty">0</div></div>
+        <div class="stat"><div class="lbl">Distinct Items</div><div class="val" id="statItems">0</div></div>
+        <div class="stat"><div class="lbl">Distinct Stores</div><div class="val" id="statStores">0</div></div>
+        <div class="stat"><div class="lbl">Months Covered</div><div class="val" id="statMonths">0</div></div>
+        <div class="stat"><div class="lbl">Detail Rows (filtered)</div><div class="val" id="statRows">0</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Top 15 breakdown</h3>
+          <div class="segwrap" id="chartSeg" style="width:260px;">
+            <button data-v="store" class="on">By store</button>
+            <button data-v="item">By item</button>
+            <button data-v="month">By month</button>
+          </div>
+        </div>
+        <div class="panel-body" id="chartBody"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Detail — month × item × store</h3>
+          <div style="display:flex; gap:8px;">
+            <input class="searchbox" id="tableSearch" placeholder="Search item / store / description…">
+            <button class="btn ghost small" id="exportCsvBtn">Export CSV</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="tablewrap">
+            <table class="datatable" id="dataTable">
+              <thead id="tableHead"></thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+          <div class="tablefoot">
+            <div id="tableCount"></div>
+            <div class="pager">
+              <button class="btn ghost small" id="prevPageBtn">Prev</button>
+              <span id="pageLabel" style="font-family:var(--mono); font-size:12px;">1 / 1</span>
+              <button class="btn ghost small" id="nextPageBtn">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footnote">Reads live from Supabase · large exports may take a moment</div>
+  </div>
+</div>
+
+<!-- ============================= ADMIN ============================= -->
+<div id="view-admin" class="view hidden" data-mode="inward">
+  <div class="app">
+    <header class="hero" style="margin-top:16px;">
+      <div class="hero-inner">
+        <h2 class="hero-title">Admin upload</h2>
+        <p class="hero-sub">Add a month's MRS Inward, Issuance, or S2S Transfer workbook to the shared database. Any team member can use this page — there's no login gate, so please double-check the report type and month before saving.</p>
+      </div>
+    </header>
+
+    <section class="setup">
+      <div class="setup-grid">
+        <div class="modecard active" id="cardInward" data-mode="inward">
+          <div class="radio"></div>
+          <div class="k">Option 01</div>
+          <h3>MRS Inward Report</h3>
+          <p>Material received into substores from DCs.</p>
+        </div>
+        <div class="modecard" id="cardIssuance" data-mode="issuance">
+          <div class="radio"></div>
+          <div class="k">Option 02</div>
+          <h3>Issuance Report</h3>
+          <p>Material issued from substores to field engineers.</p>
+        </div>
+        <div class="modecard" id="cardS2s" data-mode="s2s">
+          <div class="radio"></div>
+          <div class="k">Option 03</div>
+          <h3>S2S Transfer Report</h3>
+          <p>Store-to-store transfers, one sheet per direction.</p>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Your name (for the upload log)</label>
+          <input class="txt" id="uploadedByInput" placeholder="e.g. Chandan">
+        </div>
+      </div>
+
+      <div class="replace-toggle">
+        <label>
+          <input type="radio" name="saveMode" value="append" checked>
+          <span class="rt-title">Add to existing data</span>
+          <div class="rt-desc">Adds these rows on top of whatever's already stored for this report type / month. Use this for a brand-new month, or a supplementary file for a month already loaded.</div>
+        </label>
+        <label>
+          <input type="radio" name="saveMode" value="replace">
+          <span class="rt-title">Replace this month's data</span>
+          <div class="rt-desc">Deletes whatever's currently stored for the month(s) found in this file before saving — use this to fix a bad upload.</div>
+        </label>
+      </div>
+
+      <div class="uploadzone" id="dropzone" style="margin-top:20px;">
+        <div id="dzIcon" style="font-family:var(--mono); font-size:26px; color:var(--accent);">↑</div>
+        <h4 id="dzTitle">Drop your MRS Inward workbook here</h4>
+        <p id="dzSub">.xlsx, one sheet per month · large files (100MB+) are parsed in the background</p>
+        <button class="btn" id="browseBtn">Choose file</button>
+        <input type="file" id="fileInput" accept=".xlsx,.xls">
+        <div class="filemeta hidden" id="fileMeta"></div>
+        <div class="progresswrap hidden" id="progressWrap">
+          <div class="progressbar"><div id="progressFill"></div></div>
+          <div class="progresslabel" id="progressLabel">Reading file…</div>
+        </div>
+        <div class="errbox hidden" id="errBox"></div>
+      </div>
+
+      <div class="panel hidden" id="previewPanel">
+        <div class="panel-head"><h3>Ready to save</h3></div>
+        <div class="panel-body">
+          <div class="statrow">
+            <div class="stat"><div class="lbl">Aggregated Rows</div><div class="val" id="pvRows">0</div></div>
+            <div class="stat"><div class="lbl">Source Rows Read</div><div class="val" id="pvSourceRows">0</div></div>
+            <div class="stat"><div class="lbl">Months Found</div><div class="val" id="pvMonths">0</div></div>
+            <div class="stat"><div class="lbl">Items</div><div class="val" id="pvItems">0</div></div>
+            <div class="stat"><div class="lbl">Stores</div><div class="val" id="pvStores">0</div></div>
+          </div>
+          <p style="font-size:12.5px; color:var(--text-muted); margin-top:14px;" id="pvMonthList"></p>
+          <p style="font-size:12px; color:var(--text-dim);" id="pvSkipped"></p>
+          <div style="display:flex; gap:10px; margin-top:16px;">
+            <button class="btn" id="saveBtn">Save to database →</button>
+            <button class="btn ghost" id="discardBtn">Discard &amp; upload a different file</button>
+          </div>
+          <div class="progresswrap hidden" id="saveProgressWrap" style="margin-top:16px;">
+            <div class="progressbar"><div id="saveProgressFill"></div></div>
+            <div class="progresslabel" id="saveProgressLabel">Saving…</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notebox" id="successNote" style="display:none;"></div>
+    </section>
+
+    <section class="upload-log">
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Recent uploads</h3>
+          <button class="btn ghost small" id="refreshLogBtn">Refresh</button>
+        </div>
+        <div class="panel-body">
+          <div id="logTableWrap"><div class="loading-inline">Loading…</div></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footnote">Parsing happens in this browser tab · rows are saved to your Supabase project</div>
+  </div>
+</div>
+
+<!-- ============================= CALC ============================= -->
+<div id="view-calc" class="view hidden" data-mode="s2s">
+  <div class="app">
+    <header class="hero" style="margin-top:16px;">
+      <div class="hero-inner">
+        <h2 class="hero-title">Reconciliation calculator</h2>
+        <p class="hero-sub">(MRS Inward + S2S-in from other stores) minus (Issuance to FE + S2S-out to other stores) = remaining stock, for one item code at one store — pulled live from whatever's been uploaded to the database.</p>
+      </div>
+    </header>
+
+    <section>
+      <div class="filters">
+        <div class="field">
+          <label>Item code</label>
+          <input class="combo-input" id="calcItemInput" placeholder="Pick an item code" autocomplete="off">
+          <div class="combo-list" id="calcItemList"></div>
+        </div>
+        <div class="field">
+          <label>Store (SS)</label>
+          <input class="combo-input" id="calcStoreInput" placeholder="Pick a store" autocomplete="off">
+          <div class="combo-list" id="calcStoreList"></div>
+        </div>
+        <div class="field">
+          <label>Stock showing in I360</label>
+          <input class="combo-input" id="calcI360Input" type="number" placeholder="0">
+        </div>
+        <div class="field">
+          <label>Physical stock at store</label>
+          <input class="combo-input" id="calcPhysicalInput" type="number" placeholder="0">
+        </div>
+        <div class="field clearrow">
+          <button class="btn" id="calcRunBtn" style="width:100%;">Calculate</button>
+        </div>
+      </div>
+
+      <div class="notebox hidden" id="calcFlowMap"></div>
+      <div class="notebox hidden" id="calcMissingNote"></div>
+
+      <div id="calcResults" class="hidden">
+        <div class="panel">
+          <div class="panel-head"><h3>Total order received at store (MRS Inward)</h3></div>
+          <div class="panel-body"><div class="tablewrap"><table class="datatable" id="calcTableInward"></table></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Total S2S inward — Other to SDFX</h3></div>
+          <div class="panel-body"><div class="tablewrap"><table class="datatable" id="calcTableS2sIn"></table></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Total issuance to FE — by month</h3></div>
+          <div class="panel-body"><div class="tablewrap"><table class="datatable" id="calcTableIssuance"></table></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Total S2S outward — SDFX to Other</h3></div>
+          <div class="panel-body"><div class="tablewrap"><table class="datatable" id="calcTableS2sOut"></table></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Final stats</h3>
+            <button class="btn ghost small" id="calcExportBtn">Download calculation (.xlsx)</button>
+          </div>
+          <div class="panel-body"><div class="tablewrap"><table class="datatable" id="calcTableFinal"></table></div></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footnote">Reads live from Supabase across all three report types</div>
+  </div>
+</div>
+
+<script src="js/supabase-config.js"></script>
+<script src="js/supabase-client.js"></script>
+<script src="js/format.js"></script>
+<script src="js/parsers.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/calc.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
