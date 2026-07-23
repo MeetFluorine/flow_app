@@ -75,7 +75,7 @@ function numOrZeroLocal(v){ if(v==null||v==='') return 0; const n = typeof v==='
 async function computeCalculation(item, store){
   const res = { item, store, inwardRows:[], s2sInRows:[], s2sOutRows:[], issuanceByMonth:new Map(), hasUnknownFlow:false };
 
-  const rows = await fetchAllRows(()=> db.from('movements_raw').select('*').ilike('item_code', item).ilike('store', store));
+  const rows = await fetchAllRows(()=> db.from('movements_raw').select('*').eq('item_code', item).eq('store', store));
 
   rows.filter(r=>r.report_type==='inward').forEach(r=>{
     res.inwardRows.push({ order:r.month_order, month:r.month_label, moir:r.moir||'—', ordered:r.ordered_qty||0, qty:r.qty||0, circle:r.circle||'—' });

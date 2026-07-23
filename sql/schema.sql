@@ -57,6 +57,10 @@ create index if not exists idx_raw_lookup on movements_raw (report_type, month_l
 create index if not exists idx_raw_item on movements_raw (report_type, item_code);
 create index if not exists idx_raw_store on movements_raw (report_type, store);
 create index if not exists idx_raw_upload on movements_raw (upload_id);
+-- The Calculation dashboard looks up one item+store across ALL report types
+-- at once (no report_type filter), so it needs its own index — the ones
+-- above are all led by report_type and don't help that query.
+create index if not exists idx_raw_item_store on movements_raw (item_code, store);
 -- Full text-ish search helper (ILIKE against these is fine at moderate scale;
 -- add a trigram index later if search gets slow: requires pg_trgm extension).
 
