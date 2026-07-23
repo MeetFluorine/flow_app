@@ -165,13 +165,28 @@ function buildSummary(rowObjects){
   return Array.from(map.values());
 }
 
-async function batchInsert(table, rows, batchSize, onProgress){
-  for(let i=0;i<rows.length;i+=batchSize){
-    const batch = rows.slice(i, i+batchSize);
-    const { error } = await db.from(table).insert(batch);
-    if(error) throw new Error('Insert into ' + table + ' failed: ' + error.message);
-    onProgress(Math.min(i+batchSize, rows.length), rows.length);
+async function batchInsert(table, rows, batchSize, concurrency, onProgress){
+  const batches = [];
+  for(let i=0;i<rows.length;i+=batchSize) batches.push(rows.slice(i, i+batchSize));
+  let doneRows = 0;
+  let nextIdx = 0;
+  let firstError = null;
+
+  async function worker(){
+    while(nextIdx < batches.length && !firstError){
+      const myIdx = nextIdx++;
+      const batch = batches[myIdx];
+      const { error } = await db.from(table).insert(batch);
+      if(error){ firstError = error; return; }
+      doneRows += batch.length;
+      onProgress(Math.min(doneRows, rows.length), rows.length);
+    }
   }
+
+  const workers = [];
+  for(let w=0; w<concurrency; w++) workers.push(worker());
+  await Promise.all(workers);
+  if(firstError) throw new Error('Insert into ' + table + ' failed: ' + firstError.message);
 }
 
 async function mergeAdditiveSummary(newSummaryRows, mode, monthLabels){
@@ -209,6 +224,18 @@ $('saveBtn').addEventListener('click', async ()=>{
   const mode = state.mode;
   const replaceMode = document.querySelector('input[name="saveMode"]:checked').value === 'replace';
   const uploadedBy = $('uploadedByInput').value.trim() || null;
+
+  const monthLabelsPreview = Array.from(new Set(state.parsed.records.map(r=>r[1])));
+  if(replaceMode){
+    const ok = confirm(
+      'This will permanently delete ALL existing ' + mode + ' data for: ' + monthLabelsPreview.join(', ') +
+      '\n\n...and replace it with the ' + state.parsed.records.length.toLocaleString() + ' rows in this file. ' +
+      'This is exactly right for "finish the month" uploads (e.g. topping up a partial July with the complete month), ' +
+      'but double-check the month list above is what you expect before continuing.\n\nContinue?'
+    );
+    if(!ok) return;
+  }
+
   $('saveBtn').disabled = true;
   $('discardBtn').disabled = true;
 
@@ -227,7 +254,7 @@ $('saveBtn').addEventListener('click', async ()=>{
     }
 
     showSaveProgress('Saving detail rows… 0 / ' + rowObjects.length, 5);
-    await batchInsert('movements_raw', rowObjects, 1000, (done, total)=>{
+    await batchInsert('movements_raw', rowObjects, 2000, 4, (done, total)=>{
       const pct = 5 + Math.round((done/total)*80);
       showSaveProgress('Saving detail rows… ' + done.toLocaleString() + ' / ' + total.toLocaleString(), pct);
     });
@@ -264,6 +291,7 @@ $('saveBtn').addEventListener('click', async ()=>{
     progressWrap.classList.add('hidden');
     state.parsed = null;
     loadUploadLog();
+    loadMonthlyBreakdown();
   }catch(err){
     errBox.textContent = err.message || String(err);
     errBox.classList.remove('hidden');
@@ -305,8 +333,109 @@ async function loadUploadLog(){
 }
 $('refreshLogBtn').addEventListener('click', loadUploadLog);
 
-function initAdmin(){
+/* ======================= Data by month (view + delete) ======================= */
+async function fetchAllRowsAdmin(builderFn, pageSize){
+  pageSize = pageSize || 1000;
+  let all = [];
+  let from = 0;
+  while(true){
+    const { data, error } = await builderFn().range(from, from+pageSize-1);
+    if(error) throw new Error(error.message);
+    all = all.concat(data||[]);
+    if(!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+async function loadMonthlyBreakdown(){
+  const wrap = $('monthlyTableWrap');
+  wrap.innerHTML = '<div class="loading-inline">Loading…</div>';
+  let rows;
+  try{
+    rows = await fetchAllRowsAdmin(()=> db.from('movements_summary').select('report_type,month_order,month_label,qty,record_count'));
+  }catch(err){
+    wrap.innerHTML = '<div class="loading-inline">Could not load: ' + escapeHtml(err.message) + '</div>';
+    return;
+  }
+  if(!rows.length){
+    wrap.innerHTML = '<div class="loading-inline">No data stored yet.</div>';
+    return;
+  }
+  const groups = new Map();
+  rows.forEach(r=>{
+    const key = r.report_type + '|' + r.month_label;
+    let g = groups.get(key);
+    if(!g){ g = { report_type:r.report_type, month_order:r.month_order, month_label:r.month_label, qty:0, record_count:0 }; groups.set(key,g); }
+    g.qty += Number(r.qty)||0;
+    g.record_count += Number(r.record_count)||0;
+  });
+  const list = Array.from(groups.values()).sort((a,b)=> a.report_type.localeCompare(b.report_type) || a.month_order-b.month_order);
+
+  let html = '<table class="monthly-table"><thead><tr><th>Report Type</th><th>Month</th><th>Total Qty</th><th>Rows</th><th></th></tr></thead><tbody>';
+  list.forEach(g=>{
+    html += '<tr>' +
+      '<td>' + escapeHtml(g.report_type) + '</td>' +
+      '<td>' + escapeHtml(g.month_label) + '</td>' +
+      '<td>' + Math.round(g.qty).toLocaleString() + '</td>' +
+      '<td>' + g.record_count.toLocaleString() + '</td>' +
+      '<td><button class="del-btn" data-type="' + escapeHtml(g.report_type) + '" data-month="' + escapeHtml(g.month_label) + '">Delete</button></td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('.del-btn').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const type = btn.dataset.type, month = btn.dataset.month;
+      const ok = confirm('Permanently delete ALL ' + type + ' data for ' + month + '?\n\nThis removes every row for this month from both the detail and summary tables. It cannot be undone, and the Dashboard / Calculation tabs will stop showing this month immediately.');
+      if(!ok) return;
+      btn.disabled = true;
+      btn.textContent = 'Deleting…';
+      try{
+        const { error: e1 } = await db.from('movements_raw').delete().eq('report_type', type).eq('month_label', month);
+        if(e1) throw new Error(e1.message);
+        const { error: e2 } = await db.from('movements_summary').delete().eq('report_type', type).eq('month_label', month);
+        if(e2) throw new Error(e2.message);
+        loadMonthlyBreakdown();
+      }catch(err){
+        alert('Could not delete: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+      }
+    });
+  });
+}
+$('refreshMonthlyBtn').addEventListener('click', loadMonthlyBreakdown);
+
+/* ======================= Password gate ======================= */
+$('adminUnlockBtn').addEventListener('click', tryUnlock);
+$('adminPasswordInput').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') tryUnlock(); });
+function tryUnlock(){
+  const pw = $('adminPasswordInput').value;
+  if(window.AdminAuth.unlock(pw)){
+    $('adminPasswordErr').classList.add('hidden');
+    $('adminPasswordInput').value = '';
+    showUnlockedAdmin();
+  } else {
+    $('adminPasswordErr').classList.remove('hidden');
+  }
+}
+function showUnlockedAdmin(){
+  $('adminLock').classList.add('hidden');
+  $('adminContent').classList.remove('hidden');
   loadUploadLog();
+  loadMonthlyBreakdown();
+}
+
+function initAdmin(){
+  if(window.AdminAuth.isUnlocked()){
+    showUnlockedAdmin();
+  } else {
+    $('adminContent').classList.add('hidden');
+    $('adminLock').classList.remove('hidden');
+    $('adminPasswordInput').focus();
+  }
 }
 
 window.AdminView = { init: initAdmin };
